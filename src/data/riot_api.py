@@ -61,16 +61,25 @@ class MatchParticipant:
                 raise ValueError(
                     "MatchParticipant payload missing both 'championName' and 'championId'"
                 ) from exc
-            champion_name = str(champion_id)
+            champion_name = str(champion_id) #TODO
 
-        return cls(
-            puuid=puuid,
-            champion=champion_name,
-            individual_position=payload.get("individualPosition"),
-            team_position=payload.get("teamPosition"),
-            team_id=payload.get("teamId"),
-            win=(payload.get("win") == "true"),
-        )
+        win_val = payload.get("win")
+        if isinstance(win_val, str):
+            win_val = win_val.lower() == "true"
+        elif win_val is None:
+            win_val = None
+        try:
+            return cls(
+                puuid=puuid,
+                champion=champion_name,
+                individual_position=payload["individualPosition"],
+                team_position=payload["teamPosition"],
+                team_id=payload["teamId"],
+                win=win_val,
+            )
+        except KeyError as e:
+            raise ValueError("MatchParticipant missing fields", e)
+
 
 
 @dataclass(frozen=True)
@@ -110,19 +119,20 @@ class Match:
             MatchParticipant.from_json(participant)
             for participant in participants_payload
         )
-
-        return cls(
-            match_id=_required(metadata, "matchId", "metadata"),
-            game_creation=info.get("gameCreation"),
-            game_duration=info.get("gameDuration"),
-            game_end_timestamp=info.get("gameEndTimestamp"),
-            game_mode=info.get("gameMode"),
-            game_start_timestamp=info.get("gameStartTimestamp"),
-            game_type=info.get("gameType"),
-            game_version=info.get("gameVersion"),
-            participants=participants,
-        )
-
+        try:
+            return cls(
+                match_id=_required(metadata, "matchId", "metadata"),
+                game_creation=info["gameCreation"],
+                game_duration=info["gameDuration"],
+                game_end_timestamp=info["gameEndTimestamp"],
+                game_mode=info["gameMode"],
+                game_start_timestamp=info["gameStartTimestamp"],
+                game_type=info["gameType"],
+                game_version=info["gameVersion"],
+                participants=participants,
+            )
+        except KeyError as e:
+            raise ValueError("Match missing fields", e)
 
 @dataclass
 class League:

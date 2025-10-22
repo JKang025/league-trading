@@ -5,3 +5,5 @@ matplotlib
 seaborn
 jupyter
 requests
+pytest
+python-dotenv

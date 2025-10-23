@@ -1,0 +1,42 @@
+[tool.ruff]
+line-length = 100
+exclude = ["venv", ".venv", "build", "dist", "migrations"]
+
+# Keep it relaxed: only common-sense lint rules
+lint.select = [
+    "E",  # pycodestyle (basic style)
+    "F",  # pyflakes (real errors)
+]
+
+# Ignore nitpicky rules
+lint.ignore = [
+    "E203",
+    "E266",
+    "E501",  # (formatter handles line length, so ignore lint version)
+]
+
+[tool.ruff.format]
+# Use Ruff's autoformatter (like Black, but configurable)
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+skip-magic-trailing-comma = false
+
+# ✅ Your big requirement: one arg per line in function *calls* and *definitions*
+# Format like:
+# def foo(
+#     a: int,
+#     b: str,
+# ):
+#
+# foo(
+#     1,
+#     2,
+# )
+#
+# This matches "parameters 1 per line"
+# Ruff enforces this automatically when the formatter runs
+
+[tool.ruff.lint.isort]
+# Keep imports neat but not obsessive
+combine-as-imports = true

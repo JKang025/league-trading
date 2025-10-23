@@ -7,3 +7,4 @@ jupyter
 requests
 pytest
 python-dotenv
+duckdb

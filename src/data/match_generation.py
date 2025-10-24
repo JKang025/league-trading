@@ -2,8 +2,11 @@ import math
 import asyncio
 
 from src.utils.util import Rank, PLATFORM_TO_REGION
-from src.data.riot_api import RiotAPI, League
+from src.data.riot_api import RiotAPI, Match
+from src.data.duckdb import MatchDatabase
 
+
+database = MatchDatabase()
 
 def query_matches(
     platform: str,
@@ -44,33 +47,20 @@ def query_matches(
         pass
 
 #TODO: rate limiting logic 
-
-# controller logic that determines whether to run again or not 
-    # get match ids
-        # verify that it wasn't already processed from some other player
-
-    # verify match ids are not already in duckdb
-    # add to duckdb
-    # return number of matches added
-
-    #IDEA: (req / s ) * (time in flight) = batch_size of async 
-    # 200 req / s * 0.3 s = 60 batch_size ROUGH ESTIMATE FOR BATCH SIZE
-    #IDEA: we can do async for getting matchids and async for getting matches, 
-    # but lets make the pipline itself sync for now, i,e get matchid first, 
-    # # hen verift against db, then query matches, then insert
     
 def gather_matches(    
     platform: str,
     start_time: str,
     end_time: str,
     target_num_matches: int,
-    league: League,
+    players: list[str],
     )->int:
-    players = league.players
-    matches_per_player = max(math.ceil(target_num_matches / len(players)), 2)
     api = RiotAPI()
-
     match_ids: set[str] = set()
+
+    matches_per_player = max(math.ceil(target_num_matches / len(players)), 2)
+    batch_size_match_ids_by_puuid = int(200 * 0.1) # 200 req / s * 0.1 s = 60 batch_size 
+                                # rough estimate, estimate towards smaller flight time
 
     async def fetch_for_player(puuid: str) -> None:
         ids = await asyncio.to_thread(
@@ -86,11 +76,43 @@ def gather_matches(
             match_ids.update(ids)
 
     async def fetch_all() -> None:
-        tasks = [asyncio.create_task(fetch_for_player(puuid)) for puuid in players]
-        await asyncio.gather(*tasks, return_exceptions=False)
+        for i in range(0, len(players), batch_size_match_ids_by_puuid):
+            batch = players[i:i + batch_size_match_ids_by_puuid]
+            tasks = [asyncio.create_task(fetch_for_player(puuid)) for puuid in batch]
+            await asyncio.gather(*tasks, return_exceptions=False)
 
+    # Fetch all match IDs from players
     asyncio.run(fetch_all())
+    
+    new_match_ids = database.get_only_new_match_ids(match_ids)
+    
+    # Fetch match details for each new match ID
+    matches: list[Match] = []
 
-    # TODO: verify match ids are not already in duckdb, then insert and return number added
-    return 0
+    batch_size_match_details = int(200 * 0.1) # 200 req / s * 0.1 s = 60 batch_size 
+                                # rough estimate, estimate towards smaller flight time
+    async def fetch_match_details(match_id: str) -> None:
+        match_data = await asyncio.to_thread(
+            api.get_match,
+            match_id,
+            region=PLATFORM_TO_REGION[platform]
+        )
+        if match_data:
+            match_obj = Match.from_json(match_data)
+            matches.append(match_obj)
+
+    async def fetch_all_matches() -> None:
+        for i in range(0, len(new_match_ids), batch_size_match_details):
+            batch = list(new_match_ids)[i:i + batch_size_match_details]
+            tasks = [asyncio.create_task(fetch_match_details(match_id)) for match_id in batch]
+            await asyncio.gather(*tasks, return_exceptions=False)
+
+    # Fetch all match details
+    asyncio.run(fetch_all_matches())
+    
+    # Insert match details into database
+    sucsessful_inserts = 0
+    database.upsert_many(matches)
+    
+    return sucsessful_inserts
 

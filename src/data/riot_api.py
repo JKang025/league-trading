@@ -4,6 +4,7 @@ import os
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
+from pyrate_limiter import Limiter, RequestRate, Duration, BucketFullException
 
 import requests
 from dotenv import load_dotenv
@@ -24,6 +25,8 @@ DEFAULT_HEADERS = {
     "Origin": "https://developer.riotgames.com",
 }
 
+match_v5_limiter = RequestRate(200, Duration.SECOND)
+limiter = Limiter(match_v5_limiter)
 
 def _required(container: dict[str, Any], key: str, context: str) -> Any:
     """Fetch a required key from a mapping, raising ValueError when absent or falsy."""
@@ -266,11 +269,13 @@ class RiotAPI:
             params["start"] = start
         if count is not None:
             params["count"] = count
+        limiter.aquire("get_match_ids_by_puuid")
         return self._get(url, params=params or None)
 
     def get_match(self, match_id: str, *, region: str = "americas") -> dict[str, Any]:
         url = f"{self._region_host(region)}/lol/match/v5/matches/{match_id}"
         print(url)
+        limiter.aquire("get_match")
         return self._get(url)
 
     def get_challenger_league(

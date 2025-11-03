@@ -1,12 +1,14 @@
 import math
 import asyncio
 
-from src.utils.util import Rank, PLATFORM_TO_REGION
+from src.utils.util import Rank, PLATFORM_TO_REGION, date_string_to_iso_start_of_day, iso_to_timestamp_s
 from src.data.riot_api import RiotAPI, Match
-from src.data.duckdb import MatchDatabase
+from src.data.duckdb import MatchDatabase, QueryProgressTracker
 
 
-database = MatchDatabase()
+
+match_database = MatchDatabase()
+query_progress_tracker = QueryProgressTracker()
 
 def query_matches(
     platform: str,
@@ -61,19 +63,29 @@ def gather_matches(
     matches_per_player = max(math.ceil(target_num_matches / len(players)), 2)
     batch_size_match_ids_by_puuid = int(200 * 0.1) # 200 req / s * 0.1 s = 60 batch_size 
                                 # rough estimate, estimate towards smaller flight time
+    batch_size_match_ids_by_puuid = 1
 
     async def fetch_for_player(puuid: str) -> None:
-        ids = await asyncio.to_thread(
-            api.get_match_ids_by_puuid,
-            puuid,
-            region=PLATFORM_TO_REGION[platform],
-            start_time=start_time,
-            end_time=end_time,
-            start=0,
-            count=matches_per_player,
-        )
-        if ids:
-            match_ids.update(ids)
+        try:
+            start_index = query_progress_tracker.get_query_start_index(platform, start_time, end_time, puuid)
+            # Convert ISO strings to Unix timestamps in seconds for the API
+            start_time_s = iso_to_timestamp_s(start_time)
+            end_time_s = iso_to_timestamp_s(end_time)
+            ids = await asyncio.to_thread(
+                api.get_match_ids_by_puuid,
+                puuid,
+                region=PLATFORM_TO_REGION[platform],
+                start_time=start_time_s,
+                end_time=end_time_s,
+                start=start_index,
+                count=matches_per_player,
+            )
+            query_progress_tracker.update_start_index(platform, start_time, end_time, puuid, start_index + len(ids))
+            if ids:
+                match_ids.update(ids)
+            print(f"Fetched {len(ids)} match IDs for player {puuid}")
+        except Exception as e:
+            print(f"Error fetching match IDs for player {puuid}: {e}")
 
     async def fetch_all() -> None:
         for i in range(0, len(players), batch_size_match_ids_by_puuid):
@@ -84,22 +96,27 @@ def gather_matches(
     # Fetch all match IDs from players
     asyncio.run(fetch_all())
     
-    new_match_ids = database.get_only_new_match_ids(match_ids)
+    new_match_ids = match_database.get_only_new_match_ids(match_ids)
     
     # Fetch match details for each new match ID
     matches: list[Match] = []
 
     batch_size_match_details = int(200 * 0.1) # 200 req / s * 0.1 s = 60 batch_size 
                                 # rough estimate, estimate towards smaller flight time
+    batch_size_match_details = 1
     async def fetch_match_details(match_id: str) -> None:
-        match_data = await asyncio.to_thread(
-            api.get_match,
-            match_id,
-            region=PLATFORM_TO_REGION[platform]
-        )
-        if match_data:
-            match_obj = Match.from_json(match_data)
-            matches.append(match_obj)
+        try:
+            match_data = await asyncio.to_thread(
+                api.get_match,
+                match_id,
+                region=PLATFORM_TO_REGION[platform]
+            )
+            if match_data:
+                match_obj = Match.from_json(match_data)
+                matches.append(match_obj)
+            print(f"Fetched match details for match {match_id}")
+        except Exception as e:
+            print(f"Error fetching match details for match {match_id}: {e}")
 
     async def fetch_all_matches() -> None:
         for i in range(0, len(new_match_ids), batch_size_match_details):
@@ -111,8 +128,21 @@ def gather_matches(
     asyncio.run(fetch_all_matches())
     
     # Insert match details into database
-    sucsessful_inserts = 0
-    database.upsert_many(matches)
+    sucsessful_inserts = match_database.upsert_many(matches)
     
     return sucsessful_inserts
 
+if __name__ == "__main__":
+    platform = "NA1"
+    rank = Rank.CHALLENGER
+    api = RiotAPI()
+    league = api.get_league(platform=platform, rank=rank)
+    players = league.players
+    num_players = len(players)
+    print(num_players)
+    start_time = date_string_to_iso_start_of_day("2025-10-29")
+    end_time = date_string_to_iso_start_of_day("2025-10-30")
+    target_num_matches = 200
+    sucsessful_inserts = gather_matches(platform, start_time, end_time, target_num_matches, players)
+    print(sucsessful_inserts)
+    

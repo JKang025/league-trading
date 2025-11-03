@@ -4,7 +4,8 @@ import os
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
-from pyrate_limiter import Limiter, RequestRate, Duration, BucketFullException
+from urllib.parse import quote
+from pyrate_limiter import Limiter, RequestRate, Duration
 
 import requests
 from dotenv import load_dotenv
@@ -25,8 +26,10 @@ DEFAULT_HEADERS = {
     "Origin": "https://developer.riotgames.com",
 }
 
-match_v5_limiter = RequestRate(200, Duration.SECOND)
-limiter = Limiter(match_v5_limiter)
+match_v5_rate = RequestRate(200, Duration.SECOND)
+limiter = Limiter(match_v5_rate)
+
+global_limiter = Limiter(RequestRate(50, Duration.MINUTE))
 
 def _required(container: dict[str, Any], key: str, context: str) -> Any:
     """Fetch a required key from a mapping, raising ValueError when absent or falsy."""
@@ -243,6 +246,7 @@ class RiotAPI:
         params = {"page": page} if page is not None else None
         return self._get(url, params=params)
 
+    #@limiter.ratelimit("get_match_ids_by_puuid", delay=True)
     def get_match_ids_by_puuid(
         self,
         puuid: str,
@@ -255,12 +259,14 @@ class RiotAPI:
         start: int | None = None,
         count: int | None = None,
     ) -> Iterable[str]:
-        url = f"{self._region_host(region)}/lol/match/v5/matches/by-puuid/{puuid}/ids"
+        # Riot API requires quotes around PUUID in the path, URL-encode the quotes
+        encoded_puuid = quote(f'"{puuid}"')
+        url = f"{self._region_host(region)}/lol/match/v5/matches/by-puuid/{encoded_puuid}/ids"
         params: dict[str, Any] = {}
         if start_time is not None:
-            params["startTime"] = start_time
+            params["startTime"] = str(start_time)
         if end_time is not None:
-            params["endTime"] = end_time
+            params["endTime"] = str(end_time)
         if queue is not None:
             params["queue"] = queue
         if match_type is not None:
@@ -269,13 +275,11 @@ class RiotAPI:
             params["start"] = start
         if count is not None:
             params["count"] = count
-        limiter.aquire("get_match_ids_by_puuid")
         return self._get(url, params=params or None)
 
+    #@limiter.ratelimit("get_match", delay=True)
     def get_match(self, match_id: str, *, region: str = "americas") -> dict[str, Any]:
         url = f"{self._region_host(region)}/lol/match/v5/matches/{match_id}"
-        print(url)
-        limiter.aquire("get_match")
         return self._get(url)
 
     def get_challenger_league(
@@ -314,17 +318,53 @@ class RiotAPI:
         """Get league data for a specific rank, routing to the appropriate endpoint."""
 
         # Route to appropriate method based on tier
-        if rank == Rank.challenger:
+        if rank == Rank.CHALLENGER:
             return self.get_challenger_league(queue=queue, platform=platform)
-        elif rank == Rank.grandmaster:
+        elif rank == Rank.GRANDMASTER:
             return self.get_grandmaster_league(queue=queue, platform=platform)
-        elif rank == Rank.master:
+        elif rank == Rank.MASTER:
             return self.get_master_league(queue=queue, platform=platform)
         else:
             raise ValueError(f"Unsupported rank: {rank}")
 
+    def get_league(
+        self,
+        platform: str,
+        rank: Rank,
+        queue: str = "RANKED_SOLO_5x5",
+    ) -> League:
+        """Get league data for a specific rank and return as a League object."""
+        from src.utils.util import rank_enum_to_tier_rank
+
+        # Handle master+ ranks (Master, Grandmaster, Challenger)
+        if rank in [Rank.MASTER, Rank.GRANDMASTER, Rank.CHALLENGER]:
+            payload = self.route_by_rank_masterplus(platform=platform, rank=rank, queue=queue)
+            return League.from_masterplus_json(payload)
+
+        # Handle below-master ranks (need tier and division)
+        tier, division = rank_enum_to_tier_rank(rank)
+        # Convert tier to API format (uppercase first letter, rest lowercase)
+        tier_api = tier.capitalize()
+        # Convert division to API format (uppercase)
+        division_api = division.upper() if division else None
+        
+        if division_api is None:
+            raise ValueError(f"Rank {rank} requires a division")
+        
+        entries = self.get_league_entries(
+            queue=queue,
+            tier=tier_api,
+            division=division_api,
+            platform=platform,
+        )
+        # get_league_entries returns an iterable, convert to list
+        entries_list = list(entries) if isinstance(entries, Iterable) else entries
+        return League.from_belowmaster_json(entries_list)
+        
+    @global_limiter.ratelimit("get", delay=True)
     def _get(self, url: str, params: dict[str, Any] | None = None) -> Any:
         print(url)
+        print(params)
         response = self._session.get(
             url,
             params=params,

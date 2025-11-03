@@ -171,17 +171,16 @@ def rank_enum_to_rank_num(rank_enum: Rank) -> int:
     return rank_enum.value
 
 
-def timestamp_ms_to_iso(timestamp_ms: int) -> str:
-    """Convert millisecond timestamp to ISO 8601 format."""
-    timestamp_s = timestamp_ms / 1000
+def timestamp_s_to_iso(timestamp_s: int) -> str:
+    """Convert second timestamp to ISO 8601 format."""
     dt = datetime.datetime.fromtimestamp(timestamp_s)
     return dt.isoformat()
 
 
-def iso_to_timestamp_ms(iso_string: str) -> int:
-    """Convert ISO 8601 format to millisecond timestamp."""
+def iso_to_timestamp_s(iso_string: str) -> int:
+    """Convert ISO 8601 format to second timestamp."""
     dt = datetime.datetime.fromisoformat(iso_string)
-    return int(dt.timestamp() * 1000)
+    return int(dt.timestamp())
 
 
 def date_string_to_iso_start_of_day(date_string: str) -> str:

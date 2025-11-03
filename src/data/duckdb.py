@@ -1,6 +1,8 @@
 import duckdb
 from typing import Iterable
-from src.data.riot_api import Match
+import sys
+from pathlib import Path
+from src.data.riot_api import Match  
 
 
 class MatchDatabase:
@@ -123,6 +125,126 @@ class MatchDatabase:
         
         return match_ids - existing_ids
     
+    def clear_all_data(self) -> None:
+        """
+        Remove all data from the database.
+        
+        This will delete all rows from both the participants and matches tables.
+        The tables and indexes will remain intact.
+        """
+        # Delete participants first due to foreign key constraint
+        self.con.execute("DELETE FROM participants")
+        self.con.execute("DELETE FROM matches")
+    
+    def close(self):
+        """Close the database connection."""
+        self.con.close()
+    
+    def __enter__(self):
+        """Support context manager protocol."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Close connection when exiting context."""
+        self.close()
+
+
+class QueryProgressTracker:
+    """Tracks query progress for match ID fetching by player, platform, and time range."""
+    
+    def __init__(self, db_path: str = "data/match_data/query_progress.duckdb"):
+        """
+        Initialize query progress tracker.
+        
+        Args:
+            db_path: Path to the DuckDB database file (should match MatchDatabase)
+        """
+        self.db_path = db_path
+        self.con = duckdb.connect(db_path)
+        self._init_schema()
+    
+    def _init_schema(self):
+        """Create query_progress table if it doesn't exist."""
+        self.con.execute("""CREATE TABLE IF NOT EXISTS query_progress (
+            platform TEXT,
+            start_time TEXT,
+            end_time TEXT,
+            puuid TEXT,
+            last_start_index INTEGER DEFAULT 0,
+            last_updated TIMESTAMP DEFAULT NOW(),
+            PRIMARY KEY (platform, start_time, end_time, puuid)
+        );""")
+        self.con.execute("CREATE INDEX IF NOT EXISTS idx_query_progress_lookup ON query_progress(platform, start_time, end_time, puuid);")
+    
+    def get_query_start_index(
+        self,
+        platform: str,
+        start_time: str,
+        end_time: str,
+        player_id: str,
+    ) -> int:
+        """
+        Get the start index for match querying.
+        
+        Args:
+            platform: Platform identifier (e.g., "NA1")
+            start_time: Start time string
+            end_time: End time string
+            player_id: Player UUID (puuid)
+            
+        Returns:
+            Start index (0 if not found)
+        """
+        result = self.con.execute(
+            """
+            SELECT last_start_index 
+            FROM query_progress
+            WHERE platform = ? AND start_time = ? AND end_time = ? AND puuid = ?
+            """,
+            [platform, start_time, end_time, player_id]
+        ).fetchone()
+        
+        return result[0] if result else 0
+    
+    def update_start_index(
+        self,
+        platform: str,
+        start_time: str,
+        end_time: str,
+        puuid: str,
+        last_start_index: int,
+    ) -> None:
+        """
+        Update the last queried start index for a specific query context.
+        
+        Args:
+            platform: Platform identifier (e.g., "NA1")
+            start_time: Start time string
+            end_time: End time string
+            puuid: Player UUID
+            last_start_index: The last start index that was queried
+        """
+        self.con.execute(
+            """
+            INSERT INTO query_progress (platform, start_time, end_time, puuid, last_start_index, last_updated)
+            VALUES (?, ?, ?, ?, ?, NOW())
+            ON CONFLICT (platform, start_time, end_time, puuid) 
+            DO UPDATE SET 
+                last_start_index = excluded.last_start_index,
+                last_updated = NOW()
+            """,
+            [platform, start_time, end_time, puuid, last_start_index]
+        )
+    
+    def clear_all_data(self) -> None:
+        """
+        Remove all data from the database.
+        
+        This will delete all rows from the query_progress table.
+        The table and indexes will remain intact.
+        """
+        self.con.execute("DELETE FROM query_progress")
+    
     def close(self):
         """Close the database connection."""
         self.con.close()
@@ -137,9 +259,18 @@ class MatchDatabase:
 
 
 def _main():
-    """Example usage of the new MatchDatabase class."""
+    """Example usage: clear all data from both databases."""
+    # Clear matches database
     with MatchDatabase("data/match_data/matches.duckdb") as db:
-        print("Database initialized successfully!")
+        print("Clearing all data from matches database...")
+        db.clear_all_data()
+        print("Matches database cleared successfully!")
+    
+    # Clear query progress database
+    with QueryProgressTracker("data/match_data/query_progress.duckdb") as tracker:
+        print("Clearing all data from query progress database...")
+        tracker.clear_all_data()
+        print("Query progress database cleared successfully!")
 
 
 if __name__ == "__main__":

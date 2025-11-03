@@ -42,7 +42,7 @@ def _required(container: dict[str, Any], key: str, context: str) -> Any:
     return value
 
 
-@dataclass(frozen=True)
+@dataclass
 class MatchParticipant:
     """Represents an individual participant within a match."""
 
@@ -52,7 +52,7 @@ class MatchParticipant:
     team_position: str | None
     team_id: int | None
     win: bool | None
-    rank_num: Rank | None
+    rank_num: Rank | None = None
 
     @classmethod
     def from_json(cls, payload: dict[str, Any]) -> "MatchParticipant":
@@ -87,12 +87,13 @@ class MatchParticipant:
                 team_position=payload["teamPosition"],
                 team_id=payload["teamId"],
                 win=win_val,
+                rank_num=None,
             )
         except KeyError as e:
             raise ValueError("MatchParticipant missing fields", e)
 
 
-@dataclass(frozen=True)
+@dataclass
 class Match:
     """Represents a match and relevant metadata."""
 
@@ -105,6 +106,8 @@ class Match:
     game_type: str | None
     game_version: str | None
     participants: Sequence[MatchParticipant]
+    rank_num: Rank | None = None
+
 
     @classmethod
     def from_json(cls, payload: dict[str, Any]) -> "Match":
@@ -125,9 +128,9 @@ class Match:
         if not isinstance(participants_payload, (list, tuple)):
             raise ValueError("Match payload field 'info.participants' must be a list or tuple")
 
-        participants = tuple(
+        participants = [
             MatchParticipant.from_json(participant) for participant in participants_payload
-        )
+        ]
         try:
             return cls(
                 match_id=_required(metadata, "matchId", "metadata"),
@@ -142,6 +145,13 @@ class Match:
             )
         except KeyError as e:
             raise ValueError("Match missing fields", e)
+
+    def set_rank(self, rank: Rank) -> None:
+        """Set the rank for this match and all its participants."""
+        self.rank_num = rank
+        # Update rank for all participants
+        for participant in self.participants:
+            participant.rank_num = rank
 
 
 @dataclass

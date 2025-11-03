@@ -8,4 +8,5 @@ requests
 pytest
 python-dotenv
 duckdb
-pyrate-limiter 
+pyrate-limiter
+loguru 

@@ -35,7 +35,7 @@ def query_matches(
             rank_page_start_index = (rank_page_start_index + 1) % MAX_PAGE_INDEX
             players = league.players
 
-        processed_matches += gather_matches(platform, start_time, end_time, num_matches, players)
+        processed_matches += gather_matches(platform, start_time, end_time, num_matches, players, rank)
     return processed_matches
 
 
@@ -47,6 +47,7 @@ def gather_matches(
     end_time: str,
     target_num_matches: int,
     players: list[str],
+    rank: Rank,
     )->int:
     api = RiotAPI()
     match_ids: set[str] = set()
@@ -104,6 +105,7 @@ def gather_matches(
             )
             if match_data:
                 match_obj = Match.from_json(match_data)
+                match_obj.set_rank(rank)
                 matches.append(match_obj)
             print(f"Fetched match details for match {match_id}")
         except Exception as e:
@@ -129,7 +131,7 @@ if __name__ == "__main__":
     api = RiotAPI()
     start_time = date_string_to_iso_start_of_day("2025-10-29")
     end_time = date_string_to_iso_start_of_day("2025-10-30")
-    target_num_matches = 1000
+    target_num_matches = 100
 
     sucsessful_matches = query_matches(platform, rank, start_time, end_time, target_num_matches)
     print(sucsessful_matches)

@@ -3,3 +3,4 @@ venv/
 data/match_data/matches.
 __pycache__/
 *.py[cod]
+data/

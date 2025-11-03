@@ -63,6 +63,10 @@ class MatchDatabase:
         # Insert participants; ignore duplicates
         rows = []
         for p in m.participants:
+            rank_num = getattr(p, "rank_num", None)
+            # Convert Rank enum to its integer value for DuckDB
+            if rank_num is not None and hasattr(rank_num, 'value'):
+                rank_num = rank_num.value
             rows.append([
                 m.match_id,
                 p.puuid,
@@ -71,7 +75,7 @@ class MatchDatabase:
                 p.team_position,
                 p.team_id,
                 p.win,
-                getattr(p, "rank_num", None)  # if you add it later
+                rank_num
             ])
         self.con.executemany("""
             INSERT INTO participants (

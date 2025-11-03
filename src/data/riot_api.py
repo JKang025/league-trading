@@ -242,6 +242,7 @@ class RiotAPI:
         page: int | None = None,
         platform: str,
     ) -> Iterable[dict[str, Any]]:
+        """Get league for ranks below master"""
         url = f"{self._platform_host(platform)}/lol/league/v4/entries/{queue}/{tier}/{division}"
         params = {"page": page} if page is not None else None
         return self._get(url, params=params)
@@ -309,7 +310,7 @@ class RiotAPI:
         url = f"{self._platform_host(platform)}/lol/league/v4/masterleagues/by-queue/{queue}"
         return self._get(url)
 
-    def route_by_rank_masterplus(
+    def _route_by_rank_masterplus(
         self,
         platform: str,
         rank: Rank,
@@ -332,13 +333,14 @@ class RiotAPI:
         platform: str,
         rank: Rank,
         queue: str = "RANKED_SOLO_5x5",
+        page: int | None = None, # only for below-master ranks
     ) -> League:
         """Get league data for a specific rank and return as a League object."""
         from src.utils.util import rank_enum_to_tier_rank
 
         # Handle master+ ranks (Master, Grandmaster, Challenger)
         if rank in [Rank.MASTER, Rank.GRANDMASTER, Rank.CHALLENGER]:
-            payload = self.route_by_rank_masterplus(platform=platform, rank=rank, queue=queue)
+            payload = self._route_by_rank_masterplus(platform=platform, rank=rank, queue=queue)
             return League.from_masterplus_json(payload)
 
         # Handle below-master ranks (need tier and division)
@@ -356,11 +358,12 @@ class RiotAPI:
             tier=tier_api,
             division=division_api,
             platform=platform,
+            page=page,
         )
         # get_league_entries returns an iterable, convert to list
         entries_list = list(entries) if isinstance(entries, Iterable) else entries
         return League.from_belowmaster_json(entries_list)
-        
+
     @global_limiter.ratelimit("get", delay=True)
     def _get(self, url: str, params: dict[str, Any] | None = None) -> Any:
         print(url)

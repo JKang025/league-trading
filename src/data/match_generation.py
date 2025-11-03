@@ -2,7 +2,7 @@ import math
 import asyncio
 
 from src.utils.util import Rank, PLATFORM_TO_REGION, date_string_to_iso_start_of_day, iso_to_timestamp_s
-from src.data.riot_api import RiotAPI, Match
+from src.data.riot_api import RiotAPI, Match, League
 from src.data.duckdb import MatchDatabase, QueryProgressTracker
 
 
@@ -17,36 +17,27 @@ def query_matches(
     end_time: str,
     num_matches: int,
 ):
-    if rank in [Rank.CHALLENGER, Rank.GRANDMASTER, Rank.MASTER]:
-        # league = api.get_league(platform=platform, rank=rank)
-        # players = deque(league.players)
-        # players1 = deque()
-        # num_players = len(players)
+    processed_matches = 0
+    iterations = 0
+    rank_page_start_index = 1
 
-        
-        # matches_per_player = math.ceil(num_matches / num_players) # starting heuristic for how many matches to get for each player
-        # matches_processed = 0
-        # while matches_processed < num_matches and len(players) > 0:
-        #     player = players.pop()
-        #     matches = api.get_match_ids_by_puuid(
-        #         player,
-        #         region=PLATFORM_TO_REGION[platform],
-        #         start_time=start_time,
-        #         end_time=end_time,
-        #         start=0,
-        #         count=matches_per_player,
-        #     )
-        #     matches_processed += len(matches) # not nessesarily true, need to check with if match is already in duckdb 
-        #                                       # and if match is already processed from some other player
+    MAX_PAGE_INDEX = 10 # random index, just in case overflow (unlucky though)
+    MAX_ITERATIONS = 10 # random iterations, just in case overflow (unlucky though)
 
-        #     if len(matches) == matches_per_player:
-        #         players1.appendleft(player)
-            
-        #     if len(players) == 0:
-        #         players = players1
-        #         players1 = deque()
-        #         matches_per_player = math.ceil((num_matches - matches_processed) / len(players))
-        pass
+    while processed_matches < num_matches and iterations < MAX_ITERATIONS:
+        iterations += 1
+
+        if rank in [Rank.CHALLENGER, Rank.GRANDMASTER, Rank.MASTER]:
+            league = api.get_league(platform=platform, rank=rank)
+            players = league.players
+        else:
+            league = api.get_league(platform=platform, rank=rank, page=rank_page_start_index)
+            rank_page_start_index = (rank_page_start_index + 1) % MAX_PAGE_INDEX
+            players = league.players
+
+        processed_matches += gather_matches(platform, start_time, end_time, num_matches, players)
+    return processed_matches
+
 
 #TODO: rate limiting logic 
     
@@ -136,13 +127,9 @@ if __name__ == "__main__":
     platform = "NA1"
     rank = Rank.CHALLENGER
     api = RiotAPI()
-    league = api.get_league(platform=platform, rank=rank)
-    players = league.players
-    num_players = len(players)
-    print(num_players)
     start_time = date_string_to_iso_start_of_day("2025-10-29")
     end_time = date_string_to_iso_start_of_day("2025-10-30")
-    target_num_matches = 200
-    sucsessful_inserts = gather_matches(platform, start_time, end_time, target_num_matches, players)
-    print(sucsessful_inserts)
-    
+    target_num_matches = 1000
+
+    sucsessful_matches = query_matches(platform, rank, start_time, end_time, target_num_matches)
+    print(sucsessful_matches)

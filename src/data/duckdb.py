@@ -1,14 +1,13 @@
 import duckdb
 from typing import Iterable
-import sys
-from pathlib import Path
+from abc import ABC, abstractmethod
 from src.data.riot_api import Match  
 
 
-class MatchDatabase:
-    """Database manager for League of Legends match data."""
+class DuckDBBase(ABC):
+    """Base class for DuckDB database managers."""
     
-    def __init__(self, db_path: str = "data/match_data/matches.duckdb"):
+    def __init__(self, db_path: str):
         """
         Initialize database connection.
         
@@ -18,6 +17,41 @@ class MatchDatabase:
         self.db_path = db_path
         self.con = duckdb.connect(db_path)
         self._init_schema()
+    
+    @abstractmethod
+    def _init_schema(self):
+        """Create tables and indexes if they don't exist. Must be implemented by subclasses."""
+        pass
+    
+    @abstractmethod
+    def clear_all_data(self) -> None:
+        """Remove all data from the database. Must be implemented by subclasses."""
+        pass
+    
+    def close(self):
+        """Close the database connection."""
+        self.con.close()
+    
+    def __enter__(self):
+        """Support context manager protocol."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Close connection when exiting context."""
+        self.close()
+
+
+class MatchDatabase(DuckDBBase):
+    """Database manager for League of Legends match data."""
+    
+    def __init__(self, db_path: str = "data/match_data/matches.duckdb"):
+        """
+        Initialize database connection.
+        
+        Args:
+            db_path: Path to the DuckDB database file
+        """
+        super().__init__(db_path)
     
     def _init_schema(self):
         """Create tables and indexes if they don't exist."""
@@ -139,21 +173,9 @@ class MatchDatabase:
         # Delete participants first due to foreign key constraint
         self.con.execute("DELETE FROM participants")
         self.con.execute("DELETE FROM matches")
-    
-    def close(self):
-        """Close the database connection."""
-        self.con.close()
-    
-    def __enter__(self):
-        """Support context manager protocol."""
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Close connection when exiting context."""
-        self.close()
 
 
-class QueryProgressTracker:
+class QueryProgressTracker(DuckDBBase):
     """Tracks query progress for match ID fetching by player, platform, and time range."""
     
     def __init__(self, db_path: str = "data/match_data/query_progress.duckdb"):
@@ -163,9 +185,7 @@ class QueryProgressTracker:
         Args:
             db_path: Path to the DuckDB database file (should match MatchDatabase)
         """
-        self.db_path = db_path
-        self.con = duckdb.connect(db_path)
-        self._init_schema()
+        super().__init__(db_path)
     
     def _init_schema(self):
         """Create query_progress table if it doesn't exist."""
@@ -248,18 +268,6 @@ class QueryProgressTracker:
         The table and indexes will remain intact.
         """
         self.con.execute("DELETE FROM query_progress")
-    
-    def close(self):
-        """Close the database connection."""
-        self.con.close()
-    
-    def __enter__(self):
-        """Support context manager protocol."""
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Close connection when exiting context."""
-        self.close()
 
 
 def _main():

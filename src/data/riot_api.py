@@ -11,6 +11,7 @@ import requests
 from dotenv import load_dotenv
 
 from src.utils.util import Rank
+from src.utils.logger import log
 
 load_dotenv()
 
@@ -376,8 +377,7 @@ class RiotAPI:
 
     @global_limiter.ratelimit("get", delay=True)
     def _get(self, url: str, params: dict[str, Any] | None = None) -> Any:
-        print(url)
-        print(params)
+        log("Querying riot api", url=url, params=params)
         response = self._session.get(
             url,
             params=params,

@@ -4,3 +4,5 @@ data/match_data/matches.
 __pycache__/
 *.py[cod]
 data/
+**/.pytest_cache/
+**/__pycache__/
